@@ -4,27 +4,23 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#0f1115" />
-  <meta name="description" content="Offline port 80 reachability scanner – pure client-side" />
+  <meta name="description" content="Port 80 reachability scanner" />
   <title>port80 scanner</title>
   <link rel="stylesheet" href="css/style.css" />
-  <!-- Simple SVG favicon -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>" />
 </head>
 <body>
   <div class="app">
-    <!-- Header -->
     <header class="header">
       <h1 class="title">port80 scanner</h1>
-      <p class="subtitle">Offline · client-side only · port 80 reachability</p>
+      <p class="subtitle">Real HTTP status on port 80 · powered by Cloudflare Worker</p>
     </header>
 
-    <!-- Tab switcher -->
     <nav class="tabs" role="tablist">
       <button class="tab active" data-tab="manual" role="tab" aria-selected="true">Manual</button>
       <button class="tab" data-tab="sample" role="tab" aria-selected="false">Sample Test</button>
     </nav>
 
-    <!-- Manual panel -->
     <section id="panel-manual" class="panel active" role="tabpanel">
       <div class="input-row">
         <input
@@ -43,7 +39,6 @@
       </ul>
     </section>
 
-    <!-- Sample panel -->
     <section id="panel-sample" class="panel" role="tabpanel" hidden>
       <div class="sample-bar">
         <span id="list-status" class="status-dot">
@@ -55,19 +50,17 @@
           <button id="btn-test" class="btn primary" disabled>Sample Test</button>
         </div>
       </div>
-      <p class="hint">Each IP is probed 5 times on port 80 for accuracy.</p>
+      <p class="hint">Each IP is probed several times on port 80 for accuracy.</p>
       <ul id="sample-log" class="log" aria-live="polite">
         <li class="empty">No results yet.</li>
       </ul>
     </section>
 
-    <!-- Future content slot – easy to extend later -->
     <footer class="footer">
       <p class="note">
-        Pure offline mode · Mixed-content limits may hide some live hosts ·
-        <span id="version">v1.0</span>
+        Accurate probe via Cloudflare Worker · any HTTP reply = REACHABLE ·
+        <span id="version">v1.1</span>
       </p>
-      <!-- Room for extra notes / links / future sections -->
       <div id="extra-content"></div>
     </footer>
   </div>
