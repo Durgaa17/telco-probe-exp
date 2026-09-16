@@ -1,11 +1,12 @@
 /**
- * port80 scanner – offline only (pure client-side)
- * GitHub Pages compatible · no backend required
+ * port80 scanner
+ * Uses Cloudflare Worker for accurate HTTP status on port 80
  */
 
 /* ---------- Config ---------- */
-const TIMEOUT_MS = 3000;                 // per-probe timeout
-const TESTS_PER_IP = 5;                  // sample accuracy
+const TIMEOUT_MS = 8000;                 // allow time for worker + target
+const TESTS_PER_IP = 3;                  // sample accuracy
+const WORKER_URL = 'https://port80-probe.sivpub.workers.dev/';
 const LIST_SRC =
   'https://raw.githubusercontent.com/Durgaa17/Raam-Public-Vless/refs/heads/main/scaniplist.txt';
 const LIST_CACHE_KEY = 'telco-probe-ip-list-v1';
@@ -26,42 +27,48 @@ const panels        = {
 };
 
 /* ---------- State ---------- */
-let ipList = [];          // current sample list
-let scanning = false;     // manual busy flag
-let testing  = false;     // sample busy flag
+let ipList = [];
+let scanning = false;
+let testing  = false;
 
 /* ================================================================
-   OFFLINE PROBE
-   Uses no-cors fetch to http://host:80/.
-   Browser can only tell “something answered” vs “nothing answered”.
-   Mixed-content rules on HTTPS pages often block real open hosts –
-   this is a known browser limit, not a bug in the scanner.
+   WORKER PROBE
+   Calls our Cloudflare Worker which does a real HTTP GET to host:80
+   and returns the actual status line (same idea as original online mode).
    ================================================================ */
-async function deviceProbe(target) {
+async function workerProbe(target) {
   const start = performance.now();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
   try {
-    // favicon.ico is a common lightweight target on most web servers
-    await fetch(`http://${target}:80/favicon.ico`, {
-      mode: 'no-cors',
-      cache: 'no-store',
-      signal: controller.signal,
-    });
+    const res = await fetch(
+      `${WORKER_URL}?target=${encodeURIComponent(target)}`,
+      { cache: 'no-store', signal: controller.signal }
+    );
     clearTimeout(timer);
+    const data = await res.json();
+    const ms = data.ms ?? Math.round(performance.now() - start);
+
+    if (data.reachable) {
+      return {
+        status: 'reachable',
+        ms,
+        line: data.line || `ALIVE - HTTP ${data.status} ${data.statusText || ''}`,
+      };
+    }
     return {
-      status: 'reachable',
-      ms: Math.round(performance.now() - start),
-      line: 'Device probe: host responded (status line not readable offline)',
+      status: data.error === 'timeout' ? 'timeout' : 'error',
+      ms,
+      line: data.error || 'No response',
     };
-  } catch {
+  } catch (err) {
     clearTimeout(timer);
     const ms = Math.round(performance.now() - start);
     return {
       status: controller.signal.aborted ? 'timeout' : 'error',
       ms,
-      line: 'Device probe: no response',
+      line: controller.signal.aborted ? 'Timeout' : 'Worker unreachable',
     };
   }
 }
@@ -69,7 +76,7 @@ async function deviceProbe(target) {
 /* ---------- Helpers ---------- */
 function isValidTarget(t) {
   if (!t || t.length > 255) return false;
-  if (/[/\\?#@\s]/.test(t)) return false;          // no path / scheme / spaces
+  if (/[/\\?#@\s]/.test(t)) return false;
   return /^[a-zA-Z0-9.:_-]+$/.test(t);
 }
 
@@ -89,7 +96,7 @@ function setListStatus(state, text) {
 /* ================================================================
    SAMPLE LIST – fetch + localStorage cache
    ================================================================ */
-async function fetchList(force = false) {
+async function fetchList() {
   setListStatus('loading', 'Loading list…');
   btnUpdate.disabled = true;
   btnTest.disabled = true;
@@ -103,7 +110,6 @@ async function fetchList(force = false) {
     setListStatus('ready', `List loaded (${parsed.length})`);
     btnTest.disabled = parsed.length === 0;
   } catch {
-    // fall back to cache
     try {
       const cached = localStorage.getItem(LIST_CACHE_KEY);
       if (cached) {
@@ -125,7 +131,6 @@ async function fetchList(force = false) {
    MANUAL SCAN
    ================================================================ */
 function renderManualResult(r) {
-  // clear “empty” placeholder on first result
   if (manualLog.querySelector('.empty')) manualLog.innerHTML = '';
 
   const li = document.createElement('li');
@@ -142,7 +147,6 @@ function renderManualResult(r) {
   `;
   manualLog.prepend(li);
 
-  // keep last 40 entries
   while (manualLog.children.length > 40) {
     manualLog.removeChild(manualLog.lastChild);
   }
@@ -157,7 +161,7 @@ async function runManualScan() {
   btnScan.textContent = 'Scanning…';
 
   try {
-    const res = await deviceProbe(target);
+    const res = await workerProbe(target);
     renderManualResult({ target, ...res });
   } catch {
     renderManualResult({ target, status: 'error', ms: 0, line: 'Unexpected error' });
@@ -169,7 +173,7 @@ async function runManualScan() {
 }
 
 /* ================================================================
-   SAMPLE TEST – probe every IP several times
+   SAMPLE TEST
    ================================================================ */
 function renderSampleResult(r) {
   if (sampleLog.querySelector('.empty')) sampleLog.innerHTML = '';
@@ -204,7 +208,7 @@ async function runSampleTest() {
 
     for (let i = 0; i < TESTS_PER_IP; i++) {
       try {
-        const r = await deviceProbe(target);
+        const r = await workerProbe(target);
         if (r.status === 'reachable') {
           success++;
           msSum += r.ms;
@@ -246,10 +250,8 @@ function switchTab(name) {
   });
 }
 
-// Tab clicks
 tabs.forEach(t => t.addEventListener('click', () => switchTab(t.dataset.tab)));
 
-// Manual input enable/disable + Enter key
 targetInput.addEventListener('input', () => {
   btnScan.disabled = !targetInput.value.trim() || scanning;
 });
@@ -258,13 +260,11 @@ targetInput.addEventListener('keydown', (e) => {
 });
 btnScan.addEventListener('click', runManualScan);
 
-// Sample buttons
-btnUpdate.addEventListener('click', () => fetchList(true));
+btnUpdate.addEventListener('click', () => fetchList());
 btnTest.addEventListener('click', runSampleTest);
 
 /* ---------- Boot ---------- */
 (function init() {
-  // try cache first (instant), then refresh in background if needed
   try {
     const cached = localStorage.getItem(LIST_CACHE_KEY);
     if (cached) {
@@ -272,10 +272,9 @@ btnTest.addEventListener('click', runSampleTest);
       setListStatus('ready', `Cached list (${ipList.length})`);
       btnTest.disabled = ipList.length === 0;
       btnUpdate.disabled = false;
-      // optional background refresh
-      fetchList(false);
+      fetchList();
       return;
     }
   } catch {}
-  fetchList(false);
+  fetchList();
 })();
